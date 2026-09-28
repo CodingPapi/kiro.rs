@@ -175,7 +175,12 @@ pub fn map_model(model: &str) -> Option<String> {
             None
         }
     } else if model_lower.contains("opus") {
-        if model_lower.contains("opus-5") {
+        if model_lower.contains("opus-5.5")
+            || model_lower.contains("opus-5-5")
+            || model_lower.contains("opus5.5")
+            || model_lower.contains("opus5-5") {
+            Some("claude-opus-5.5".to_string())
+        } else if model_lower.contains("opus-5") {
             Some("claude-opus-5".to_string())
         } else if model_lower.contains("4-5") || model_lower.contains("4.5") {
             Some("claude-opus-4.5".to_string())
