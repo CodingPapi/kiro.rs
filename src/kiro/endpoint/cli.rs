@@ -1,9 +1,10 @@
 //! Kiro CLI 端点（Amazon Q for CLI）
 //!
 //! 对应 Kiro CLI / Amazon Q for CLI 使用的 AWS JSON 协议端点：
-//! - URL: `https://q.{api_region}.amazonaws.com/`（根路径 + x-amz-target 头）
+//! - URL: `https://runtime.{api_region}.kiro.dev/`（根路径 + x-amz-target 头）
+//!   旧的 `q.{api_region}.amazonaws.com` 已对旧版本返回 403 FEATURE_NOT_SUPPORTED
 //! - Content-Type: `application/x-amz-json-1.0`
-//! - User-Agent: aws-sdk-rust 格式
+//! - User-Agent: Kiro CLI 3.x (KAS, aws-sdk-js) 格式
 //! - 请求体 origin: `KIRO_CLI`
 //!
 //! 适用于使用 `ksk_` 前缀 API Key 的凭据。
@@ -14,6 +15,9 @@ use uuid::Uuid;
 use super::{KiroEndpoint, RequestContext};
 
 pub const CLI_ENDPOINT_NAME: &str = "cli";
+
+/// Kiro CLI 3.1.0 内置的 KAS 版本（抓包所得）
+const KAS_VERSION: &str = "0.66.91";
 
 pub struct CliEndpoint;
 
@@ -27,22 +31,30 @@ impl CliEndpoint {
     }
 
     fn host(&self, ctx: &RequestContext<'_>) -> String {
-        format!("q.{}.amazonaws.com", self.api_region(ctx))
+        format!("runtime.{}.kiro.dev", self.api_region(ctx))
+    }
+
+    /// Kiro CLI 3.x 的客户端标识段（KAS = Kiro Agent Server 版本）
+    fn client_tag(&self, ctx: &RequestContext<'_>) -> String {
+        format!(
+            "KiroCLI/{v} KAS/{kas} os/{os} md/appVersion-{v} app/AmazonQ-For-CLI acp-client/kiro-cli-non-interactive",
+            v = ctx.config.kiro_version,
+            kas = KAS_VERSION,
+            os = ctx.config.system_version,
+        )
     }
 
     fn user_agent(&self, ctx: &RequestContext<'_>) -> String {
         format!(
-            "aws-sdk-rust/1.3.15 ua/2.1 api/codewhispererstreaming/1.0.34 os/{} lang/rust/1.95.0 md/appVersion-{} app/AmazonQ-For-CLI",
+            "aws-sdk-js/1.0.0 ua/2.1 os/{} lang/js md/nodejs#{} api/kiroruntime#1.0.0 m/N,E app/kiro-cli {}",
             ctx.config.system_version,
-            ctx.config.kiro_version,
+            ctx.config.node_version,
+            self.client_tag(ctx),
         )
     }
 
     fn x_amz_user_agent(&self, ctx: &RequestContext<'_>) -> String {
-        format!(
-            "aws-sdk-rust/1.3.15 ua/2.1 api/codewhispererstreaming/1.0.34 os/{} lang/rust/1.95.0 m/F app/AmazonQ-For-CLI",
-            ctx.config.system_version,
-        )
+        format!("aws-sdk-js/1.0.0 {}", self.client_tag(ctx))
     }
 }
 
@@ -62,20 +74,22 @@ impl KiroEndpoint for CliEndpoint {
     }
 
     fn api_url(&self, ctx: &RequestContext<'_>) -> String {
-        format!("https://q.{}.amazonaws.com/", self.api_region(ctx))
+        format!("https://runtime.{}.kiro.dev/", self.api_region(ctx))
     }
 
     fn mcp_url(&self, ctx: &RequestContext<'_>) -> String {
-        format!("https://q.{}.amazonaws.com/mcp", self.api_region(ctx))
+        format!("https://runtime.{}.kiro.dev/", self.api_region(ctx))
     }
 
     fn decorate_api(&self, req: RequestBuilder, ctx: &RequestContext<'_>) -> RequestBuilder {
         let mut req = req
             .header(
                 "x-amz-target",
-                "AmazonCodeWhispererStreamingService.GenerateAssistantResponse",
+                "KiroRuntimeService.GenerateAssistantResponse",
             )
             .header("x-amzn-codewhisperer-optout", "false")
+            .header("x-amzn-kiro-client-attribution", "kiro-cli")
+            .header("x-amzn-kiro-mode-identifier", "vibe")
             .header("x-amz-user-agent", self.x_amz_user_agent(ctx))
             .header("user-agent", self.user_agent(ctx))
             .header("host", self.host(ctx))
@@ -91,6 +105,7 @@ impl KiroEndpoint for CliEndpoint {
 
     fn decorate_mcp(&self, req: RequestBuilder, ctx: &RequestContext<'_>) -> RequestBuilder {
         let mut req = req
+            .header("x-amz-target", "KiroRuntimeService.InvokeMCP")
             .header("x-amz-user-agent", self.x_amz_user_agent(ctx))
             .header("user-agent", self.user_agent(ctx))
             .header("host", self.host(ctx))
